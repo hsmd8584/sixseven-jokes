@@ -18,7 +18,7 @@
 
 SixSeven Jokes is a **production AI product** that delivers personalized, age-appropriate jokes to kids through a complete system covering data ingestion, retrieval, generation, voice synthesis, and user feedback loops. The product is live on iOS, Android, and Web with several hundred daily active users.
 
-This repository showcases the **core AI and data systems** I designed and built:
+This repository showcases the **core AI and data systems**:
 
 | Module | Description |
 |--------|-------------|
